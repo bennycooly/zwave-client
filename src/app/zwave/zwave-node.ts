@@ -1,4 +1,6 @@
 
+import { ComClass } from "./comclass";
+
 class ZWaveNode {
     id: number;
     manufacturer: string;
@@ -9,7 +11,7 @@ class ZWaveNode {
     type: string;
     name: string;
     loc: string;
-    classes: any[];
+    classes: ComClass[];
     ready: boolean;
 
     constructor(id: number) {
@@ -25,6 +27,7 @@ class ZWaveNode {
         this.classes = [];
         this.ready = false;
     }
+
 }
 
 export { ZWaveNode };

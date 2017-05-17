@@ -3,11 +3,14 @@ import * as EventEmitter from "events";
 const OpenZWave = require("openzwave-shared");
 
 
-import { ZWaveNode } from "./zwave-node";
+import { ZWaveNode, ComClass } from "./zwave-node";
 const config = require("../config/zwave.json");
 
 
-
+/**
+ * ZWave Client.
+ * Manages the OpenZWave Client status and list of nodes connected.
+ */
 class ZWaveClient extends EventEmitter {
     private static port: string;
 
@@ -49,26 +52,31 @@ class ZWaveClient extends EventEmitter {
 
         zwave.on("node added", (nodeid: number) => {
             let newNode = new ZWaveNode(nodeid);
-            this._nodes.push(newNode);
+            this._nodes[nodeid] = newNode;
             this.emit("node added", newNode);
         });
 
-        zwave.on("value added", (nodeid: number, comclass: number, value: any) => {
+        zwave.on("value added", (nodeid: number, comClassId: number, value: any) => {
             let node = this._nodes[nodeid];
-            let classes = node.classes;
-            if (!classes[comclass])
-                classes[comclass] = {};
-            classes[comclass][value.index] = value;
+            // First check if the ComClass exists.
+            if (!node.classes[comClassId] === undefined) {
+                // Create the ComClass here.
+                node.classes[comClassId] = new ComClass(comClassId);
+            }
+            let nodeComClass = node.classes[comClassId];
+            nodeComClass.values[value.index] = value;
+            this.emit("node updated", node);
         });
 
-        zwave.on("value changed", (nodeid: number, comclass: number, value: any) => {
-            if (this._nodes[nodeid]["ready"]) {
-                console.log("node%d: changed: %d:%s:%s->%s", nodeid, comclass,
-                    value["label"],
-                    this._nodes[nodeid]["classes"][comclass][value.index]["value"],
-                    value["value"]);
+        zwave.on("value changed", (nodeid: number, comClassId: number, value: any) => {
+            let node = this._nodes[nodeid];
+            if (node.ready) {
+                console.log(
+                    `node${nodeid}: changed:${comClassId}:${value.label}:${node.classes[comClassId].values[value.index]}:${value.value}`
+                    );
             }
-            this._nodes[nodeid]["classes"][comclass][value.index] = value;
+
+            node.classes[comClassId].values[value.index].set(value);
 
             if (nodeid === 2 && value.genre === "config") {
                 // set timeout to 10 secs
@@ -81,24 +89,27 @@ class ZWaveClient extends EventEmitter {
                 }
                 // console.log(`PIR time: ${zwave.requestConfigParam(nodeid, 3)}`);
             }
+
+            this.emit("node updated", node);
         });
 
-        zwave.on("value removed", (nodeid: number, comclass: number, index: any) => {
-            if (this._nodes[nodeid]["classes"][comclass] &&
-                this._nodes[nodeid]["classes"][comclass][index])
-                delete this._nodes[nodeid]["classes"][comclass][index];
+        zwave.on("value removed", (nodeid: number, comClassId: number, index: any) => {
+            if (this._nodes[nodeid]["classes"][comClassId] &&
+                this._nodes[nodeid]["classes"][comClassId][index])
+                delete this._nodes[nodeid]["classes"][comClassId][index];
         });
 
         zwave.on("node ready", (nodeid: number, nodeinfo: any) => {
-            this._nodes[nodeid]["manufacturer"] = nodeinfo.manufacturer;
-            this._nodes[nodeid]["manufacturerid"] = nodeinfo.manufacturerid;
-            this._nodes[nodeid]["product"] = nodeinfo.product;
-            this._nodes[nodeid]["producttype"] = nodeinfo.producttype;
-            this._nodes[nodeid]["productid"] = nodeinfo.productid;
-            this._nodes[nodeid]["type"] = nodeinfo.type;
-            this._nodes[nodeid]["name"] = nodeinfo.name;
-            this._nodes[nodeid]["loc"] = nodeinfo.loc;
-            this._nodes[nodeid]["ready"] = true;
+            let node = this._nodes[nodeid];
+            node["manufacturer"] = nodeinfo.manufacturer;
+            node["manufacturerid"] = nodeinfo.manufacturerid;
+            node["product"] = nodeinfo.product;
+            node["producttype"] = nodeinfo.producttype;
+            node["productid"] = nodeinfo.productid;
+            node["type"] = nodeinfo.type;
+            node["name"] = nodeinfo.name;
+            node["loc"] = nodeinfo.loc;
+            node["ready"] = true;
             console.log("node%d: %s, %s", nodeid,
                 nodeinfo.manufacturer ? nodeinfo.manufacturer
                     : "id=" + nodeinfo.manufacturerid,
@@ -110,15 +121,15 @@ class ZWaveClient extends EventEmitter {
                 nodeinfo.type,
                 nodeinfo.loc);
 
-            for (let comclass of this._nodes[nodeid].classes) {
-                switch (comclass) {
+            for (let comClass of node.classes) {
+                switch (comClass.value) {
                     case 0x25: // COMMAND_CLASS_SWITCH_BINARY
                     case 0x26: // COMMAND_CLASS_SWITCH_MULTILEVEL
-                        zwave.enablePoll(nodeid, comclass);
+                        zwave.enablePoll(nodeid, comClass);
                         break;
                 }
-                let values = this._nodes[nodeid]["classes"][comclass];
-                console.log("node%d: class %d", nodeid, comclass);
+                let values = this._nodes[nodeid]["classes"][comClass];
+                console.log("node%d: class %d", nodeid, comClass);
                 for (let idx in values)
                     console.log("node%d:   %s=%s", nodeid, values[idx]["label"], values[idx]["value"]);
             }
