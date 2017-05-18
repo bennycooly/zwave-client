@@ -3,7 +3,9 @@ import * as EventEmitter from "events";
 const OpenZWave = require("openzwave-shared");
 
 
-import { ZWaveNode, ComClass } from "./zwave-node";
+import { ZWaveNode } from "./zwave-node";
+import { ComClass } from "./comclass";
+import { ValueClass } from "./valueclass";
 const config = require("../config/zwave.json");
 
 
@@ -59,12 +61,16 @@ class ZWaveClient extends EventEmitter {
         zwave.on("value added", (nodeid: number, comClassId: number, value: any) => {
             let node = this._nodes[nodeid];
             // First check if the ComClass exists.
-            if (!node.classes[comClassId] === undefined) {
+            if (node.classes[comClassId] === undefined) {
                 // Create the ComClass here.
+                console.log(`create comClass ${comClassId}`);
                 node.classes[comClassId] = new ComClass(comClassId);
             }
-            let nodeComClass = node.classes[comClassId];
-            nodeComClass.values[value.index] = value;
+            if (node.classes[comClassId].values[value.index] === undefined) {
+                node.classes[comClassId].values[value.index] = new ValueClass(value.index);
+            }
+            node.classes[comClassId].values[value.index].setValue(value);
+
             this.emit("node updated", node);
         });
 
@@ -72,11 +78,19 @@ class ZWaveClient extends EventEmitter {
             let node = this._nodes[nodeid];
             if (node.ready) {
                 console.log(
-                    `node${nodeid}: changed:${comClassId}:${value.label}:${node.classes[comClassId].values[value.index]}:${value.value}`
-                    );
+                    `
+                    node${nodeid} changed: \
+                    ${value.label} (${comClassId}): \ 
+                    ${node.classes[comClassId].values[value.index].value}->${value.value}
+                    `
+                );
             }
 
-            node.classes[comClassId].values[value.index].set(value);
+            // Create the value class if it does not exist
+            if (node.classes[comClassId].values[value.index] === undefined) {
+                node.classes[comClassId].values[value.index] = new ValueClass(value.index);
+            }
+            node.classes[comClassId].values[value.index].setValue(value);
 
             if (nodeid === 2 && value.genre === "config") {
                 // set timeout to 10 secs
@@ -94,44 +108,55 @@ class ZWaveClient extends EventEmitter {
         });
 
         zwave.on("value removed", (nodeid: number, comClassId: number, index: any) => {
-            if (this._nodes[nodeid]["classes"][comClassId] &&
-                this._nodes[nodeid]["classes"][comClassId][index])
-                delete this._nodes[nodeid]["classes"][comClassId][index];
+            let node = this._nodes[nodeid];
+            if (node.classes[comClassId] &&
+                node.classes[comClassId].values[index])
+                delete node.classes[comClassId].values[index];
         });
 
         zwave.on("node ready", (nodeid: number, nodeinfo: any) => {
             let node = this._nodes[nodeid];
-            node["manufacturer"] = nodeinfo.manufacturer;
-            node["manufacturerid"] = nodeinfo.manufacturerid;
-            node["product"] = nodeinfo.product;
-            node["producttype"] = nodeinfo.producttype;
-            node["productid"] = nodeinfo.productid;
-            node["type"] = nodeinfo.type;
-            node["name"] = nodeinfo.name;
-            node["loc"] = nodeinfo.loc;
-            node["ready"] = true;
-            console.log("node%d: %s, %s", nodeid,
-                nodeinfo.manufacturer ? nodeinfo.manufacturer
-                    : "id=" + nodeinfo.manufacturerid,
-                nodeinfo.product ? nodeinfo.product
-                    : "product=" + nodeinfo.productid +
-                    ", type=" + nodeinfo.producttype);
-            console.log("node%d: name='%s', type='%s', location='%s'", nodeid,
-                nodeinfo.name,
-                nodeinfo.type,
-                nodeinfo.loc);
+            node.manufacturer = nodeinfo.manufacturer;
+            node.manufacturerid = nodeinfo.manufacturerid;
+            node.product = nodeinfo.product;
+            node.producttype = nodeinfo.producttype;
+            node.productid = nodeinfo.productid;
+            node.type = nodeinfo.type;
+            node.name = nodeinfo.name;
+            node.loc = nodeinfo.loc;
+            node.ready = true;
+            console.log(
+                `
+                node${node.id}: \
+                ${nodeinfo.manufacturer ?
+                    nodeinfo.manufacturer :
+                    "id=" + nodeinfo.manufacturerid}, \
+                ${nodeinfo.product ?
+                    nodeinfo.product :
+                    "product=" + nodeinfo.productid +
+                    ", type=" + nodeinfo.producttype}
+                `
+            );
+
+            console.log(
+                `node${node.id}: name=${nodeinfo.name}, type=${nodeinfo.type}, location=${nodeinfo.loc}`
+            );
 
             for (let comClass of node.classes) {
-                switch (comClass.value) {
+                if (comClass === undefined) {
+                    continue;
+                }
+                switch (comClass.id) {
                     case 0x25: // COMMAND_CLASS_SWITCH_BINARY
                     case 0x26: // COMMAND_CLASS_SWITCH_MULTILEVEL
-                        zwave.enablePoll(nodeid, comClass);
+                        zwave.enablePoll(node.id, comClass.id);
                         break;
                 }
-                let values = this._nodes[nodeid]["classes"][comClass];
-                console.log("node%d: class %d", nodeid, comClass);
-                for (let idx in values)
-                    console.log("node%d:   %s=%s", nodeid, values[idx]["label"], values[idx]["value"]);
+                let values = node.classes[comClass.id].values;
+                console.log(`node${node.id}: class ${comClass.id}`);
+                for (let value of values) {
+                    console.log(`node${node.id}: ${value.label}=${value.value}`);
+                }
             }
 
             // if multisensor, then we set params here

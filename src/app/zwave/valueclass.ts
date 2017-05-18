@@ -6,11 +6,11 @@ class ValueClass {
     label: string;
     value: any;
 
-    constructor() {
-
+    constructor(index: number) {
+        this.index = index;
     }
 
-    set(value: any): void {
+    setValue(value: any): void {
         this.index = value.index;
         this.type = value.type;
         this.genre = value.genre;
